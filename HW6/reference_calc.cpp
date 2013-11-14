@@ -65,6 +65,7 @@ void computeIteration(const unsigned char* const dstImg,
 
 }
 
+
 //pre-compute the values of g, which depend only the source image
 //and aren't iteration dependent.
 void computeG(const unsigned char* const channel,

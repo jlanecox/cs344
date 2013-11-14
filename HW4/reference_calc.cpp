@@ -35,7 +35,7 @@ void reference_calculation(unsigned int* inputVals,
 
     //perform exclusive prefix sum (scan) on binHistogram to get starting
     //location for each bin
-    for (unsigned int j = 1; j < numBins; ++j) {
+    for (int j = 1; j < numBins; ++j) {
       binScan[j] = binScan[j - 1] + binHistogram[j - 1];
     }
 

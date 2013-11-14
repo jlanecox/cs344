@@ -79,7 +79,180 @@
 
 */
 
+#include "reference_calc.h"
 #include "utils.h"
+
+  // min = -3.10921
+  // max = 2.26509
+  // range = 5.37429
+__global__ void reduce_min_and_max_1D(float* d_minOut, float* d_maxOut,
+                                      const float* const d_inMin, const float* const d_inMax,
+                                     const int numRows, const int numCols, const int flag)
+{
+  extern __shared__ float sdata[];
+
+  const int myId = ( blockIdx.x * (blockDim.x*2) ) + threadIdx.x;
+  //const int myId = ( blockIdx.x * (blockDim.x) ) + threadIdx.x;
+  const int tid = threadIdx.x;
+
+  //make sure we don't try and access memory outside the image
+  //by having any threads mapped there return early
+  if( myId >= (numCols*numRows ) )
+    return;
+
+  float* smaxdata = &sdata[0];
+  float* smindata = &sdata[blockDim.x];
+
+  const float* inMin = d_inMin;
+  const float* inMax = d_inMax;
+
+  // only use d_Min
+  if( flag == 1 )
+  {
+    inMax = d_inMin;
+  }
+  // use only d_Max
+  else if( flag == 2 )
+  {
+    inMin = d_inMax;
+  }
+
+  smindata[tid] = min( inMin[myId], inMin[myId + blockDim.x]);
+  smaxdata[tid] = max( inMax[myId], inMax[myId + blockDim.x]);
+  //smindata[tid] = inMin[myId];
+  //smaxdata[tid] = inMax[myId];
+
+  __syncthreads();
+
+  for( unsigned int s=(blockDim.x/2); s>0; s>>=1 )
+  {
+    if( tid < s )
+    {
+      smindata[tid] = min( smindata[tid], smindata[tid + s] );
+      smaxdata[tid] = max( smaxdata[tid], smaxdata[tid + s] );
+    }
+    __syncthreads();
+  }
+
+  /*
+  if( tid < 32 )
+  {
+    smindata[tid] = min( smindata[tid], smindata[tid + 6] );
+    smaxdata[tid] = max( smaxdata[tid], smaxdata[tid + 6] );
+
+    smindata[tid] = min( smindata[tid], smindata[tid + 5] );
+    smaxdata[tid] = max( smaxdata[tid], smaxdata[tid + 5] );
+
+    smindata[tid] = min( smindata[tid], smindata[tid + 4] );
+    smaxdata[tid] = max( smaxdata[tid], smaxdata[tid + 4] );
+
+    smindata[tid] = min( smindata[tid], smindata[tid + 3] );
+    smaxdata[tid] = max( smaxdata[tid], smaxdata[tid + 3] );
+
+    smindata[tid] = min( smindata[tid], smindata[tid + 2] );
+    smaxdata[tid] = max( smaxdata[tid], smaxdata[tid + 2] );
+
+    smindata[tid] = min( smindata[tid], smindata[tid + 1] );
+    smaxdata[tid] = max( smaxdata[tid], smaxdata[tid + 1] );
+  }
+  */
+
+  if( tid == 0 )
+  {
+    d_minOut[blockIdx.x] = smindata[tid];
+    d_maxOut[blockIdx.x] = smaxdata[tid];
+  }
+}
+
+
+
+
+__global__ void gen_histo(unsigned int* d_out, const float* const d_in,
+                          const float minLum, const float lumRange,
+                          const int numBins, const int numRows, const int numCols)
+{
+//  extern __shared__ float sdata[];
+
+  //const float lumRange = maxLum - minLum;
+
+  const int myPos = (blockDim.x * blockIdx.x) + threadIdx.x;
+  //const int tid = threadIdx.x;
+
+  //const int myBlk1D_pos = threadIdx.x + blockDim.x * threadIdx.y;
+  //const int totalBlockSamps = blockDim.x * blockDim.y;
+
+
+  // function: bin = (lum[i] - lumMin) / lumRange * numBins
+  const float item = d_in[myPos];
+  const unsigned int bin = min( (unsigned int)(( item - minLum) / lumRange * (float)numBins), (unsigned int)(numBins-1) );
+  //atomicAdd( &(sdata[bin]), 1);
+  atomicAdd( &(d_out[bin]), 1);
+}
+
+__global__ void exclusive_scan(unsigned int* d_out, const unsigned int* const d_in,
+                              const int numBins)
+{
+  // blelloch scan (reduce and downsweep)
+  extern __shared__ unsigned int sidata[];
+
+  const int tid = threadIdx.x;
+  //const int myPos = threadIdx.x;// + (blockIdx.x * blockDim.x*2);
+  int offset = 1;
+
+/*
+  // this should not happen
+  if( myPos > numBins )
+  {
+    return;
+  }
+*/
+
+  // copy data into shared mem
+  sidata[2*tid] = d_in[2*tid+1];
+  sidata[2*tid+1] = d_in[2*tid+1];
+  __syncthreads();
+
+  // reductions steps
+  for(unsigned int s=(numBins>>1); s > 0; s >>= 1)
+  {
+    if(tid < s)
+    {
+      int a = offset*(2*tid+1)-1;
+      int b = offset*(2*tid+2)-1;
+
+      sidata[b] += sidata[a];
+    }
+    __syncthreads();
+
+    offset *= 2;
+  }
+
+  // reduction step done, clear the last element
+    if( tid == 0 ) { sidata[numBins-1] = 0; }
+
+  // downsweep steps
+  for(unsigned int s=1; s < numBins; s *= 2)
+  {
+    offset >>= 1;
+    if( tid < s )
+    {
+      int a = offset*(2*tid+1)-1;
+      int b = offset*(2*tid+2)-1;
+
+      unsigned int tmp = sidata[a];
+      sidata[a] = sidata[b];
+      sidata[b] += tmp;
+    }
+    __syncthreads();
+  }
+
+  // copy to output
+  d_out[2*tid]   = sidata[2*tid];
+  d_out[2*tid+1] = sidata[2*tid+1];
+}
+
+
+#define MAX_THREADS 1024
 
 void your_histogram_and_prefixsum(const float* const d_logLuminance,
                                   unsigned int* const d_cdf,
@@ -89,16 +262,103 @@ void your_histogram_and_prefixsum(const float* const d_logLuminance,
                                   const size_t numCols,
                                   const size_t numBins)
 {
-  //TODO
-  /*Here are the steps you need to implement
-    1) find the minimum and maximum value in the input logLuminance channel
-       store in min_logLum and max_logLum
-    2) subtract them to find the range
-    3) generate a histogram of all the values in the logLuminance channel using
-       the formula: bin = (lum[i] - lumMin) / lumRange * numBins
-    4) Perform an exclusive scan (prefix sum) on the histogram to get
-       the cumulative distribution of luminance values (this should go in the
-       incoming d_cdf pointer which already has been allocated for you)       */
+  const size_t numPixels = numRows * numCols;
+  // const size_t cdf_len = numBins;
+  // const size_t logLuminance_len = numPixels;
 
+  const dim3 blockSize(numCols, 1, 1);
+  const dim3 gridSize((numPixels + blockSize.x - 1) / blockSize.x, 1, 1);
+  //TODO
+
+  /*Here are the steps you need to implement*/
+  // 1) find the minimum and maximum value in the input logLuminance channel
+  //    store in min_logLum and max_logLum
+  // myTODO: imp reduce with min
+
+  // need space for each reduction of each block
+  float *d_minOut = NULL;
+  float *d_maxOut = NULL;
+
+  const unsigned int numBlocks = gridSize.x * gridSize.y;
+
+  checkCudaErrors( cudaMalloc(&d_minOut, numPixels*sizeof(float)) );
+  checkCudaErrors( cudaMalloc(&d_maxOut, numPixels*sizeof(float)) );
+
+  checkCudaErrors(cudaMemset(d_minOut, 0, sizeof(float)*numPixels));
+  checkCudaErrors(cudaMemset(d_maxOut, 0, sizeof(float)*numPixels));
+
+  const int numThreadsPerBlock = blockSize.x * blockSize.y;
+
+  reduce_min_and_max_1D<<<gridSize, blockSize, 2*numThreadsPerBlock*sizeof(float)>>>
+      ( d_minOut, d_maxOut, d_logLuminance, d_logLuminance, numRows, numCols, 1 );
+
+  cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+
+
+  float* h_min = new float[numBlocks];
+  float* h_max = new float[numBlocks];
+
+  checkCudaErrors(cudaMemcpy(h_min, d_minOut, (numBlocks*sizeof(float)), cudaMemcpyDeviceToHost));
+  checkCudaErrors(cudaMemcpy(h_max, d_maxOut, (numBlocks*sizeof(float)), cudaMemcpyDeviceToHost));
+
+  min_logLum = 0.0f;
+  max_logLum = 0.0f;
+  for(unsigned int i=0; i < numBlocks; ++i)
+  {
+    min_logLum = min( min_logLum, h_min[i] );
+    max_logLum = max( max_logLum, h_max[i] );
+  }
+
+  delete [] h_min; h_min = NULL;
+  delete [] h_max; h_max = NULL;
+
+
+  /////////////////////////////////////////
+  // 2) subtract them to find the range  //
+  float range = max_logLum - min_logLum;
+
+  /*
+  std::cout << "Min, Max, Range: "
+            << min_logLum << " "
+            << max_logLum << " "
+            << range
+            << "\nnumRows, numCols, numBins: "
+            << numRows << " " << numCols << " " << numBins
+            << std::endl;
+
+  std::cout << "NumBlocks (gridX, gridY): " << numBlocks
+            << " (" << gridSize.x << "," << gridSize.y
+            << "), (blockX, blockY): " << blockSize.x
+            << "," << blockSize.y << ")"
+            << std::endl;
+   */
+  checkCudaErrors(cudaFree(d_minOut));
+  checkCudaErrors(cudaFree(d_maxOut));
+
+
+
+  // 3) generate a histogram of all the values in the logLuminance channel using
+  //    the formula: bin = (lum[i] - lumMin) / lumRange * numBins
+  unsigned int* d_histo = NULL;
+  checkCudaErrors( cudaMalloc(&d_histo, numBins*sizeof(unsigned int)) );
+  checkCudaErrors( cudaMemset(d_histo, 0, sizeof(unsigned int)*numBins));
+
+  gen_histo<<< gridSize, blockSize, numBins*sizeof(int)>>>
+      ( d_histo, d_logLuminance, min_logLum, range, numBins, numRows, numCols);
+
+  cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+
+
+  // 4) Perform an exclusive scan (prefix sum) on the histogram to get
+  //    the cumulative distribution of luminance values (this should go in the
+  //    incoming d_cdf pointer which already has been allocated for you)
+  const dim3 gridES(1,1,1);
+  const dim3 blockES((numBins/2),1,1);
+
+  exclusive_scan<<<gridES, blockES, sizeof(unsigned int)*numBins>>>
+      ( d_cdf, d_histo, numBins );
+
+  cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+  checkCudaErrors(cudaFree(d_histo));
 
 }

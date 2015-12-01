@@ -66,12 +66,13 @@
 #include <cstdio>
 #include <iostream>
 #include <string>
+#include <algorithm>
 
 #include "utils.h"
 #include <thrust/host_vector.h>
 #include "reference_calc.h"
 
-
+#if 0
 #define REF_MASK 1
 #define MY_MASK 1
 #define COMP_MASK (MY_MASK && REF_MASK && 1)
@@ -547,12 +548,17 @@ int IsInteriorOrBorder( const size_t nRows,
 }
 #endif
 
+#endif //if 0
 
 void your_blend(const uchar4* const h_sourceImg,  //IN
                 const size_t numRowsSource, const size_t numColsSource,
                 const uchar4* const h_destImg, //IN
                 uchar4* const h_blendedImg) //OUT
 {
+}
+
+// take this out and the closing braket above
+#if 0
   const size_t srcSize = numRowsSource * numColsSource;
 
   /* To Recap here are the steps you need to implement */
@@ -1057,3 +1063,5 @@ void reference_calc(const uchar4* const h_sourceImg,
 #endif
 
 }
+
+#endif // #if 0

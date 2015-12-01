@@ -8,9 +8,15 @@
 cmake_minimum_required(VERSION 2.6 FATAL_ERROR)
 project(cs344)
 
+# change this to ON or comment out to link with the opencv static libs
+# (this also will require other variables to be set so the other deps 
+# and crt will be built/linked as static (BUILD_SHARED_LIBS perhaps?))
+set(OpenCV_STATIC OFF)
+
 find_package(OpenCV REQUIRED)
 find_package(CUDA REQUIRED)
 
+include_directories(${OpenCV_INCLUDE_DIRS})
 link_libraries(${OpenCV_LIBS} )
 
 set (EXECUTABLE_OUTPUT_PATH "${CMAKE_SOURCE_DIR}/bin/")
@@ -20,16 +26,19 @@ if(CUDA_FOUND)
   # whether to build x64.  We tell it to support most devices, though, 
   # to make sure more people can easily run class code without knowing 
   # about this compiler argument
+  #set(CUDA_NVCC_FLAGS "
+  #-ccbin /usr/bin/clang; # this causes problems in visual studio
   set(CUDA_NVCC_FLAGS "
-  -ccbin /usr/bin/clang; 
   -gencode;arch=compute_30,code=sm_30;  
   -gencode;arch=compute_35,code=sm_35;
   -gencode;arch=compute_35,code=compute_35;
-  -gencode;arch=compute_20,code=sm_20; 
-  -gencode;arch=compute_11,code=sm_11; 
-  -gencode;arch=compute_12,code=sm_12;
-  -gencode;arch=compute_13,code=sm_13;")
+  -gencode;arch=compute_20,code=sm_20;") 
+  #-gencode;arch=compute_11,code=sm_11; 
+  #-gencode;arch=compute_12,code=sm_12;
+  #-gencode;arch=compute_13,code=sm_13;")
 
+  #message("set nvcc flags: ${CUDA_NVCC_FLAGS}")
+  
   # add -Wextra compiler flag for gcc compilations
   if (UNIX)
     set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} "-Xcompiler -Wextra")
@@ -39,12 +48,12 @@ if(CUDA_FOUND)
   # add debugging to CUDA NVCC flags.  For NVidia's NSight tools.
   set(CUDA_NVCC_FLAGS_DEBUG ${CUDA_NVCC_FLAGS_DEBUG} "-G")
 
-  add_subdirectory (HW1)
-  add_subdirectory (HW2)
-  add_subdirectory (HW3)
-  add_subdirectory (HW4)
-  add_subdirectory (HW5)
-  add_subdirectory (HW6)
+  add_subdirectory ("Problem Sets/Problem Set 1")
+  add_subdirectory ("Problem Sets/Problem Set 2")
+  add_subdirectory ("Problem Sets/Problem Set 3")
+  add_subdirectory ("Problem Sets/Problem Set 4")
+  add_subdirectory ("Problem Sets/Problem Set 5")
+  add_subdirectory ("Problem Sets/Problem Set 6")
 else(CUDA_FOUND)
   message("CUDA is not installed on this system.")
 endif()
